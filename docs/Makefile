@@ -10,4 +10,4 @@ all: $(REPORTS)
 	$(PANDOC) $< -o $@
 
 clean:
-	rm -f *.pdf
+	rm -f $(REPORTS)
