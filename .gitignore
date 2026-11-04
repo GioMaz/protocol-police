@@ -1,1 +1,9 @@
 *.pdf
+.DS_Store
+
+# BMad personal config (team config lives in _bmad/config.toml and _bmad/custom/config.toml)
+_bmad/config.user.toml
+_bmad/custom/config.user.toml
+
+# Claude Code personal settings
+.claude/settings.local.json
