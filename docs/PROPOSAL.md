@@ -69,11 +69,12 @@ inclusion-based points-to analysis [Andersen 1994] and control-flow analysis
 we generalize this to many objects and user-declared protocols, across function
 calls.
 
-At its core, Protocol Police combines **typestate analysis, control-flow
-analysis, pointer analysis, context sensitivity and path sensitivity**. These
-are a starting point rather than a fixed recipe: we expect to add supporting
-analyses where the protocols need them, for example a simple value analysis to
-decide the return-value guards described below.
+We aim to combine **typestate analysis, control-flow analysis, pointer
+analysis, context sensitivity and path sensitivity** in a single analyzer. How
+far we take each of them will depend on what the protocols and the supported
+language features require, and we will add supporting analyses where needed,
+for example a simple value analysis to decide the return-value guards described
+below.
 
 # Analysis goals
 
@@ -104,17 +105,29 @@ class Transaction() {
 
   @from(Active) @to { case 0 => Committed; case n if n > 0 => Active; case _ => Failed }
   def commit(): Int = 0
+
+  @from(Active) @to { case _ => Idle }
+  @from(Failed) @to { case _ => Idle }
+  def rollback(): Unit = ()
 }
 ```
 
-When the result is unknown, we keep every outcome that cannot be ruled out,
-together with the correlation between the result and the state, so that a later
-test such as `if (status == 0)` can refine it. This is where path sensitivity
-pays off. We allow a method to carry several transition declarations (for
-example, closing two files passed as arguments), and we treat unannotated
-methods as leaving protocol states unchanged. When an annotated method returns
-a protocol object, we make no assumption about which object it is unless an
-annotation declares it.
+Since the returned value is usually unknown, we keep every outcome that cannot
+be ruled out and remember which result goes with which state. A later test on
+the result can then select the matching state:
+
+```scala
+val status = t.commit();
+if (status == 0) {
+  // status is 0, so t is Committed for sure
+} else {
+  t.rollback()   // here t is Active or Failed: both allow rollback
+}
+```
+
+Without this correlation, `t` could be in any of the three states in both
+branches, and the analyzer would warn about correct code. This is where path
+sensitivity pays off.
 
 # MiniScala adaptations
 
