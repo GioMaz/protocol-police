@@ -7,7 +7,7 @@ REPORTS=$(patsubst %.md,%.pdf,$(wildcard *.md))
 all: $(REPORTS)
 
 %.pdf: %.md
-	$(PANDOC) $< -o $@
+	$(PANDOC) --citeproc $< -o $@
 
 clean:
 	rm -f $(REPORTS)

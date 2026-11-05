@@ -6,6 +6,9 @@ date: \today
 
 geometry: margin=0.75in
 toc: true
+bibliography: references.bib
+link-citations: true
+colorlinks: true
 header-includes:
   - \usepackage{stmaryrd}
   - \DeclareUnicodeCharacter{03BC}{\ensuremath{\mu}}
@@ -36,7 +39,7 @@ declared protocol. Since the protocol lives in the annotations and not in the
 analyzer, adding a new protocol should only require writing a new annotated
 class.
 
-The underlying concept is typestate [Strom and Yemini 1986]. We do not expect
+The underlying concept is typestate [@strom1986]. We do not expect
 to invent a new algorithm. What we want to do is bring together techniques from
 the literature and from the course into one working verifier for MiniScala,
 adapt them where the language requires it, and measure how well the result
@@ -46,30 +49,30 @@ performs.
 
 Typestate has been studied for a long time, both as an extension of type
 systems and as a whole-program analysis, and our design borrows from both
-sides. Fugue [DeLine and Fähndrich 2004] and Plural [Bierhoff and Aldrich 2007]
+sides. Fugue [@deline2004] and Plural [@bierhoff2007]
 attach typestate pre- and postconditions to the methods of a class, and the
-Resource Leak Checker of the Checker Framework [Kellogg et al. 2021] verifies
+Resource Leak Checker of the Checker Framework [@kellogg2021] verifies
 that resources get closed based on annotations in the libraries. Our
 annotations follow the same idea. The main difference is that these tools
 check programs modularly, so client code needs annotations as well, whereas we
 analyze the whole program and only the protocol classes have to be annotated.
 
-On the analysis side, three papers shaped our plan. Hallem et al. [2002] show
+On the analysis side, three papers shaped our plan. @hallem2002 show
 how protocol-specific state machines can be kept apart from a reusable
 analysis engine, which is the kind of extensibility we are after; their system
 is built for bug finding, though, and deliberately accepts missing some bugs,
-while we want a conservative analysis. ESP [Das et al. 2002] demonstrates that
+while we want a conservative analysis. ESP [@das2002] demonstrates that
 keeping track of which branch outcomes go together with which protocol states
 removes many false alarms, at a reasonable cost for protocols such as file
-handling. Fink et al. [2008] make clear that typestate verification is only as
+handling. @fink2008 make clear that typestate verification is only as
 good as the alias information behind it: a call can update an object's state
 precisely only if the analysis knows which object the call refers to.
 
-The basic machinery comes from the course [Møller and Schwartzbach] and the
+The basic machinery comes from the course [@spa] and the
 work it builds on: monotone frameworks, interprocedural analysis with
-call-string or functional contexts [Sharir and Pnueli 1981; Reps et al. 1995],
-inclusion-based points-to analysis [Andersen 1994] and control-flow analysis
-[Shivers 1991]. SPA already uses a fixed open/close protocol as an example; we
+call-string or functional contexts [@sharir1981; @reps1995],
+inclusion-based points-to analysis [@andersen1994] and control-flow analysis
+[@shivers1991]. SPA already uses a fixed open/close protocol as an example; we
 want to go further and handle many objects at once, protocols declared by the
 user, and calls across functions. Our aim is therefore to combine typestate
 analysis, control-flow analysis, pointer analysis, context sensitivity and path
@@ -248,26 +251,5 @@ confidence that the implementation does what we intend.
 
 # References
 
-- L. O. Andersen. *Program Analysis and Specialization for the C Programming
-  Language*. PhD thesis, DIKU, University of Copenhagen, 1994.
-- K. Bierhoff and J. Aldrich. Modular typestate checking of aliased objects.
-  *OOPSLA*, 2007.
-- M. Das, S. Lerner and M. Seigle. ESP: Path-sensitive program verification in
-  polynomial time. *PLDI*, 2002.
-- R. DeLine and M. Fähndrich. Typestates for objects. *ECOOP*, 2004.
-- S. J. Fink, E. Yahav, N. Dor, G. Ramalingam and E. Geay. Effective typestate
-  verification in the presence of aliasing. *ACM TOSEM*, 2008.
-- S. Hallem, B. Chelf, Y. Xie and D. Engler. A system and language for building
-  system-specific, static analyses. *PLDI*, 2002.
-- M. Kellogg, N. Shadab, M. Sridharan and M. D. Ernst. Lightweight and modular
-  resource leak verification. *ESEC/FSE*, 2021.
-- A. Møller and M. I. Schwartzbach. *Static Program Analysis*. Aarhus
-  University.
-- T. Reps, S. Horwitz and M. Sagiv. Precise interprocedural dataflow analysis
-  via graph reachability. *POPL*, 1995.
-- M. Sharir and A. Pnueli. Two approaches to interprocedural data flow
-  analysis. In *Program Flow Analysis: Theory and Applications*, 1981.
-- O. Shivers. *Control-Flow Analysis of Higher-Order Languages*. PhD thesis,
-  Carnegie Mellon University, 1991.
-- R. E. Strom and S. Yemini. Typestate: A programming language concept for
-  enhancing software reliability. *IEEE TSE*, 1986.
+::: {#refs}
+:::
