@@ -17,85 +17,88 @@ header-includes:
 
 # Idea
 
-Many APIs are only correct when their operations are called in a particular
-order: a file must be opened before it is read and closed before the program
-ends; a transaction must begin before it is used and must end in a commit or a
-rollback; a connection must be established before data is sent. These *usage
-protocols* are usually documented informally, and violating them is a common
-source of bugs.
+Many APIs only work correctly if their operations are called in the right
+order. A file has to be opened before it can be read and should be closed
+before the program ends; a database transaction has to be started before it is
+used and should end either in a commit or in a rollback. These rules are
+usually written down only in the documentation, and breaking them is a classic
+source of bugs: leaked resources, reads on closed streams, transactions left
+half-finished.
 
-*Protocol Police* is a static analyzer for MiniScala that verifies user
-programs against such protocols. Library developers declare a protocol directly
-on a class through annotations: the constructor declares the initial state and
-the set of final states, and each method declares the state transitions it
-causes. The analyzer then checks the *user program* that uses the class, never
-the class implementation itself. New protocols are introduced by writing new
-annotated classes, without modifying the analysis engine.
+For our project we want to build *Protocol Police*, a static analyzer for
+MiniScala that checks whether a program respects such usage protocols. Whoever
+writes a class describes its protocol directly in the code through
+annotations: the constructor states in which state a new object starts and
+which states count as properly finished, and each method states from which
+state it may be called and which state it leads to. The analyzer then looks at
+the program that *uses* these classes and checks every call against the
+declared protocol. Since the protocol lives in the annotations and not in the
+analyzer, adding a new protocol should only require writing a new annotated
+class.
 
-This is typestate analysis [Strom and Yemini 1986]. Our contribution is not a
-new algorithm but the adaptation and integration of established techniques into
-a reusable verifier for MiniScala, together with an empirical evaluation of how
-well it works.
+The underlying concept is typestate [Strom and Yemini 1986]. We do not expect
+to invent a new algorithm. What we want to do is bring together techniques from
+the literature and from the course into one working verifier for MiniScala,
+adapt them where the language requires it, and measure how well the result
+performs.
 
-# Motivation and research basis
+# Background and related work
 
-Typestate was introduced by Strom and Yemini [1986] and has since been studied
-both as a type discipline and as a whole-program analysis. We draw on several
-lines of work:
+Typestate has been studied for a long time, both as an extension of type
+systems and as a whole-program analysis, and our design borrows from both
+sides. Fugue [DeLine and Fähndrich 2004] and Plural [Bierhoff and Aldrich 2007]
+attach typestate pre- and postconditions to the methods of a class, and the
+Resource Leak Checker of the Checker Framework [Kellogg et al. 2021] verifies
+that resources get closed based on annotations in the libraries. Our
+annotations follow the same idea. The main difference is that these tools
+check programs modularly, so client code needs annotations as well, whereas we
+analyze the whole program and only the protocol classes have to be annotated.
 
-- **Protocols declared on classes.** Fugue [DeLine and Fähndrich 2004] and
-  Plural [Bierhoff and Aldrich 2007] let developers annotate object methods
-  with typestate pre- and postconditions, and the Checker Framework's Resource
-  Leak Checker [Kellogg et al. 2021] verifies that resources are closed using
-  library annotations. Our annotation design follows this tradition, but we
-  check the client program with a whole-program analysis instead of modular
-  type checking, so that clients need no annotations of their own.
-- **Extensible checkers.** Hallem et al. [2002] separate protocol-specific
-  state machines from a reusable analysis engine. We adopt this separation,
-  but unlike their bug-finding system, which explicitly accepts missed bugs,
-  we aim for conservative verification.
-- **Path sensitivity.** ESP [Das et al. 2002] shows that tracking which branch
-  outcomes correlate with which protocol states removes many false alarms, and
-  that this can be done efficiently for file-like protocols.
-- **Aliasing.** Fink et al. [2008] show that typestate verification depends on
-  precise alias information: a state change can only be applied as a strong
-  update when the analysis knows which object is affected.
+On the analysis side, three papers shaped our plan. Hallem et al. [2002] show
+how protocol-specific state machines can be kept apart from a reusable
+analysis engine, which is the kind of extensibility we are after; their system
+is built for bug finding, though, and deliberately accepts missing some bugs,
+while we want a conservative analysis. ESP [Das et al. 2002] demonstrates that
+keeping track of which branch outcomes go together with which protocol states
+removes many false alarms, at a reasonable cost for protocols such as file
+handling. Fink et al. [2008] make clear that typestate verification is only as
+good as the alias information behind it: a call can update an object's state
+precisely only if the analysis knows which object the call refers to.
 
-We build the analysis on the course material [Møller and Schwartzbach] and the
-classic work behind it: monotone frameworks, interprocedural analysis with
+The basic machinery comes from the course [Møller and Schwartzbach] and the
+work it builds on: monotone frameworks, interprocedural analysis with
 call-string or functional contexts [Sharir and Pnueli 1981; Reps et al. 1995],
 inclusion-based points-to analysis [Andersen 1994] and control-flow analysis
-[Shivers 1991]. SPA presents a single fixed open/close protocol as an example;
-we generalize this to many objects and user-declared protocols, across function
-calls.
+[Shivers 1991]. SPA already uses a fixed open/close protocol as an example; we
+want to go further and handle many objects at once, protocols declared by the
+user, and calls across functions. Our aim is therefore to combine typestate
+analysis, control-flow analysis, pointer analysis, context sensitivity and path
+sensitivity in a single analyzer. How far we can push each of them will depend
+on what the protocols and the supported language features turn out to need,
+and we expect to add smaller supporting analyses along the way, for instance a
+simple value analysis to decide the return-value conditions described in the
+next section.
 
-We aim to combine **typestate analysis, control-flow analysis, pointer
-analysis, context sensitivity and path sensitivity** in a single analyzer. How
-far we take each of them will depend on what the protocols and the supported
-language features require, and we will add supporting analyses where needed,
-for example a simple value analysis to decide the return-value guards described
-below.
+# What the analyzer checks
 
-# Analysis goals
+We want the analysis to be conservative: if the analyzer says that a program
+uses a protocol correctly, this should hold for every execution, at least
+within the part of MiniScala we support. Every use of an annotated class is
+checked against two requirements. Each method must be called in a state that
+allows it, and when the program ends every protocol object must be in one of
+its final states. The second check looks at the state the object is in at the
+end, so a file that is closed and then reopened has to be closed again.
 
-Our goal is **conservative verification of protocol usage**: we check every use
-of an annotated class against the protocol its annotations declare. For the
-supported MiniScala subset, we report one of three outcomes for each protocol
-requirement:
+Being conservative means that the analyzer cannot always decide whether
+something is wrong, so we distinguish three kinds of results. A requirement is
+*verified* when it holds on all executions. It produces an *error* when a
+violation is certain, and a *warning* when the analysis cannot rule a violation
+out, for example when a file may be either open or closed at a call to
+`read()` depending on which branch was taken before.
 
-- **Verified:** the requirement holds on every execution.
-- **Warning:** the analysis cannot exclude a violation (for example, a file may
-  be either `Open` or `Closed` at a `read()`).
-- **Error:** a violation is established.
-
-We check two kinds of requirements: every method call must happen in an allowed
-state, and at the end of the program every protocol object must be in one of
-its declared final states. We define completion on the *current* state, so
-reopening a closed file renews the obligation to close it.
-
-We also let annotations relate a method's return value to the resulting state,
-using an ordered case block. For example, a commit operation that returns a
-status code:
+Some protocols depend on what a method returns. A commit may succeed or fail,
+and the state of the transaction afterwards depends on the result. We let
+annotations express this with an ordered list of cases on the return value:
 
 ```scala
 @protocol(init = Idle, final = {Idle, Committed})
@@ -112,9 +115,11 @@ class Transaction() {
 }
 ```
 
-Since the returned value is usually unknown, we keep every outcome that cannot
-be ruled out and remember which result goes with which state. A later test on
-the result can then select the matching state:
+The syntax here is only a sketch, and we will fix the details during the first
+week. The analyzer usually does not know what `commit()` will return, so it
+keeps every outcome that cannot be excluded and remembers which result belongs
+to which state. When the program later tests the result, the analysis can make
+use of that:
 
 ```scala
 val status = t.commit();
@@ -125,30 +130,38 @@ if (status == 0) {
 }
 ```
 
-Without this correlation, `t` could be in any of the three states in both
-branches, and the analyzer would warn about correct code. This is where path
-sensitivity pays off.
+If the analysis lost the connection between `status` and the state of `t`, it
+would only know that `t` is in one of three states in both branches, and it
+would raise warnings on a correct program. Keeping these correlations is where
+path sensitivity becomes useful.
 
-# MiniScala adaptations
+# Adapting MiniScala
 
-We reuse the supplied parser, type checker, interpreter, intermediate
-representation and CFG construction. We make three additions to the language:
+We plan to reuse as much as possible of the provided MiniScala implementation,
+in particular the parser, the type checker, the interpreter, the intermediate
+representation and the CFG construction. Three things are missing for our
+project.
 
-1. **Annotations.** We extend the lexer, parser and AST with annotations on
-   class declarations (initial and final states) and on method declarations
-   (transitions). We extend the type checker to validate state names and guard
-   expressions, and let the interpreter ignore annotations.
-2. **Imports.** MiniScala programs consist of a single file. We add a minimal
-   `import "path"` directive: we restrict imported files to class
-   declarations, load each file once, reject cyclic imports, and add the
-   imported classes to the program's outer block before type checking. We
-   extend source positions with a file name so that diagnostics point to the
-   right file.
-3. **Stub libraries.** MiniScala has no files, transactions or networking, so
-   we write *stub* classes whose bodies only fake the behaviour, for example a
-   `read()` that returns a constant. We consider this sufficient, since our
-   analysis concerns how an API is used, not how it is implemented. We put each
-   protocol in its own importable library file.
+The first is the annotations themselves. We will extend the lexer, the parser
+and the AST so that class declarations can carry the initial and final states
+and method declarations can carry transitions. The type checker will reject
+annotations that refer to unknown states or contain ill-typed conditions,
+while the interpreter simply ignores them.
+
+The second is a way to split a program over several files. MiniScala programs
+currently consist of a single file, which would force every test program to
+repeat the protocol classes it uses. We will add a minimal `import "path"`
+directive: an imported file may only contain class declarations, each file is
+loaded once, cyclic imports are rejected, and the imported classes are added to
+the outer block of the program before type checking. Source positions will also
+record the file name, so that error messages point to the right place.
+
+The third is the libraries. MiniScala has no files, transactions or
+networking, so we will write stub classes whose methods only pretend to do the
+work, for instance a `read()` that always returns the same number. For our
+purpose this is enough, since the analysis is about how an API is used and not
+about how it is implemented. Each protocol gets its own library file that
+programs can import:
 
 ```scala
 import "lib/file.s"
@@ -159,16 +172,18 @@ import "lib/file.s"
 }
 ```
 
-We start with a core subset (values, local variables, objects and references,
-annotated calls and conditionals) and add loops, user-defined functions and
-aliasing next. Higher-order functions and closures, in particular closures
-capturing mutable variables, are expansion goals.
+We will start from a small core of the language (values, local variables,
+objects and references, annotated calls and conditionals) and then add loops,
+user-defined functions and aliasing. Higher-order functions and closures,
+especially closures that capture mutable variables, are something we would like
+to support but do not consider part of the minimum.
 
-# Milestones and timeline
+# Plan
 
-We estimate a combined effort of roughly 60–80 hours. The milestones below are
-indicative: each one should leave a working, tested analyzer, and later scope
-is adjusted to actual progress.
+We expect to spend around 60 to 80 hours in total on the project. The schedule
+below is a guideline rather than a fixed plan: after each step we want a
+working and tested analyzer, and we will decide what comes next based on how
+far we got.
 
 | Period | Milestone |
 |---|---|
@@ -177,52 +192,55 @@ is adjusted to actual progress.
 | Nov 20–26 | Path-sensitive refinements (return values correlated with states), transactions as a second protocol, broader language coverage. |
 | Nov 27–Dec 4 | Evaluation and fixes; presentation on December 3 and report on December 4. |
 
+The first week is mostly about the front end, so we keep the analysis itself
+narrow there and leave aliasing, loops and function calls for the second week.
+
 # Evaluation
 
-We will build a benchmark suite alongside the analyzer, using protocols
-inspired by well-known APIs: files (Java `Closeable`), transactions (SQL
-`BEGIN`/`COMMIT`/`ROLLBACK`) and, if time allows, connections (Java `Socket`).
-We deliberately keep these as small MiniScala models; they do not reproduce the
-real APIs in full. The suite contains small controlled programs that isolate branches,
-loops, aliases, calls and return-value tests, plus a few larger programs that
-combine features. We will measure:
+Alongside the analyzer we will build a set of benchmark programs based on
+protocols most programmers know: files, modelled on Java's `Closeable`,
+transactions, modelled on SQL's `BEGIN`, `COMMIT` and `ROLLBACK`, and, if there
+is time, network connections in the style of Java's `Socket`. These are small
+MiniScala models rather than faithful copies of the real APIs. The suite will
+contain short programs that each isolate one feature, such as a branch, a
+loop, an alias, a function call or a test on a return value, together with a
+few larger programs that combine them.
 
-- **Extensibility:** adding protocols only through annotations, with no engine
-  changes.
-- **Verification quality:** safe programs verified, violations confirmed,
-  warnings on safe programs, and any invalid program wrongly verified.
-- **Cost:** analysis time, and possibly memory, as program size and features
-  grow.
+With these benchmarks we want to answer three questions. First, can new
+protocols really be added through annotations alone, without touching the
+analyzer? Second, how precise is the analysis: how many correct programs does
+it verify, how many violations does it report as errors, and how many warnings
+does it raise on correct code? Since we aim for a conservative analysis, we
+will also check that no incorrect program is ever verified. Third, how much
+does it cost, in running time and possibly memory, as programs grow and use
+more features? Where it is feasible we will also run the analysis with and
+without context and path sensitivity, to see what the extra precision actually
+buys and what it costs.
 
-Where practical, we will compare configurations with and without context and
-path sensitivity to show what the extra precision buys and what it costs.
+# Working method, AI and testing
 
-# Process, AI use and testing
+We will work in short iterations, following an agile process supported by the
+BMad method: we keep a prioritized backlog, deliver small pieces that can be
+tested on their own, and regularly look at the results to decide what to do
+next. Most of the work will be done through pair programming, switching between
+who writes the code and who reviews it, so that both of us follow every design
+decision and read every piece of generated code as it is written.
 
-We will follow an agile process supported by BMad: short iterations deliver
-small, testable increments from a prioritized backlog, and we review progress
-and results regularly to adjust scope. We will work by **pair programming**,
-rotating driver and navigator roles, so that both of us review every design
-decision and every piece of AI-generated code as it is written.
+We plan to use AI throughout the project, mainly to explore the literature, to
+explain algorithms we are not yet familiar with, to help with the
+implementation and to generate variations of our test programs. We will not
+take generated code at face value: it is reviewed during pair programming and
+checked against expected results that we work out ourselves. We will also keep
+short notes on where the AI helped, where it got things wrong and how we
+noticed, which we will use for the reflection in the final report.
 
-We will use AI, through the BMad workflow, for literature exploration,
-explaining algorithms, implementation assistance, and generating test variants.
-Generated code is reviewed by the pair and validated against expected results
-that we establish ourselves. We will keep short notes on useful assistance,
-mistakes and corrections for the final reflection.
-
-Testing grows with the implementation:
-
-- **Annotation checks:** malformed or inconsistent protocol declarations are
-  rejected.
-- **Expected-outcome tests:** small programs with manually established results
-  covering verified, warning and error cases.
-- **Feature combinations:** branches, loops, aliases and calls added
-  progressively, then combined.
-- **Regression tests:** earlier examples are kept as the supported subset
-  grows.
-
-A passing test suite is evidence of correctness, not a soundness proof.
+Testing will grow together with the analyzer. We will check that malformed or
+inconsistent annotations are rejected, and for each feature we will write small
+programs whose expected result (verified, warning or error) we determine by
+hand. As more of the language is supported we will combine features in the
+same program, and we will keep all earlier tests as regression tests. A passing
+test suite does not prove that the analysis is sound, but it gives us
+confidence that the implementation does what we intend.
 
 <!-- TODO (not yet agreed): runtime soundness testing in the style of SPA 12.3,
      instrumenting the interpreter to record actual protocol states and checking
