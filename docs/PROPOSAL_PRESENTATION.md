@@ -80,25 +80,20 @@ gives no false warning
 
 :::: columns
 ::: {.column width="50%"}
-**Typestate** [@strom1986]
+**Typestate checking**
 
-- Fugue, Plural, Resource Leak Checker
-  [@deline2004; @bierhoff2007; @kellogg2021]: annotation-based but
-  *modular*, so clients need annotations too
-- we analyze the *whole program* and only annotate the protocol classes
-- @hallem2002: state machines kept separate from the engine
-- ESP [@das2002]: path sensitivity removes false alarms
-- @fink2008: precision depends on alias information
+- existing tools (Fugue, Plural) are *modular*: every client needs annotations
+- we analyze the *whole program*: only protocol classes are annotated
+- protocols kept separate from the analysis engine
+- precision depends on paths and aliases
 :::
 ::: {.column width="50%"}
-**From the course** [@spa]
+**From the course**
 
 - monotone frameworks
-- interprocedural analysis with call strings or functional contexts
-  [@sharir1981; @reps1995]
-- Andersen points-to analysis [@andersen1994]
-- control-flow analysis [@shivers1991]
-- path sensitivity, plus small helper analyses (e.g. values)
+- interprocedural analysis (context sensitivity)
+- points-to analysis
+- path sensitivity
 
 Goal: **combine them** into one working verifier
 :::
@@ -163,10 +158,3 @@ testing one feature, plus a few larger ones
 - With and without context and path sensitivity
 :::
 ::::
-
-## References {.allowframebreaks}
-
-\footnotesize
-
-::: {#refs}
-:::
